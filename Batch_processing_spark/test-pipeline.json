@@ -1,0 +1,251 @@
+{
+  "pipelineSpec": {
+    "components": {
+      "comp-batch-model-scoring": {
+        "executorLabel": "exec-batch-model-scoring",
+        "inputDefinitions": {
+          "parameters": {
+            "inputpath": {
+              "type": "STRING"
+            },
+            "outputpath": {
+              "type": "STRING"
+            }
+          }
+        }
+      },
+      "comp-feature-engineering": {
+        "executorLabel": "exec-feature-engineering",
+        "inputDefinitions": {
+          "parameters": {
+            "input_temp_table": {
+              "type": "STRING"
+            },
+            "project_id": {
+              "type": "STRING"
+            }
+          }
+        },
+        "outputDefinitions": {
+          "parameters": {
+            "Output": {
+              "type": "STRING"
+            }
+          }
+        }
+      },
+      "comp-get-input-data": {
+        "executorLabel": "exec-get-input-data",
+        "inputDefinitions": {
+          "parameters": {
+            "project_id": {
+              "type": "STRING"
+            },
+            "query": {
+              "type": "STRING"
+            }
+          }
+        },
+        "outputDefinitions": {
+          "parameters": {
+            "Output": {
+              "type": "STRING"
+            }
+          }
+        }
+      }
+    },
+    "deploymentSpec": {
+      "executors": {
+        "exec-batch-model-scoring": {
+          "container": {
+            "args": [
+              "--inputpath",
+              "{{$.inputs.parameters['inputpath']}}",
+              "--outputpath",
+              "{{$.inputs.parameters['outputpath']}}"
+            ],
+            "command": [
+              "sh",
+              "-c",
+              "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery[pandas]==2.34.3' 'pandas' 'google-cloud-aiplatform' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery[pandas]==2.34.3' 'pandas' 'google-cloud-aiplatform' --user) && \"$0\" \"$@\"",
+              "sh",
+              "-ec",
+              "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+              "def batch_model_scoring(inputpath, outputpath):\n    '''Import model and perorm batch scoring'''\n    import google.cloud.aiplatform as aip\n\n    model_id = '75325342595678208'\n    model = aip.Model(model_name=model_id, project='qwiklabs-gcp-01-df00ef1cf655', location='us-central1')\n    model.batch_predict(\n        job_display_name=\"batch_scoring_poc\",\n        #gcs_source=inputpath,\n        instances_format='bigquery',\n        bigquery_source = inputpath,\n        #instances_format=\"csv\",\n        bigquery_destination_prefix=outputpath\n    )\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Batch model scoring', description='Import model and perorm batch scoring')\n_parser.add_argument(\"--inputpath\", dest=\"inputpath\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--outputpath\", dest=\"outputpath\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs = batch_model_scoring(**_parsed_args)\n"
+            ],
+            "image": "python:3.9"
+          }
+        },
+        "exec-feature-engineering": {
+          "container": {
+            "args": [
+              "--input-temp-table",
+              "{{$.inputs.parameters['input_temp_table']}}",
+              "--project-id",
+              "{{$.inputs.parameters['project_id']}}",
+              "----output-paths",
+              "{{$.outputs.parameters['Output'].output_file}}"
+            ],
+            "command": [
+              "sh",
+              "-c",
+              "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery[pandas]==2.34.3' 'pandas' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery[pandas]==2.34.3' 'pandas' --user) && \"$0\" \"$@\"",
+              "sh",
+              "-ec",
+              "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+              "def feature_engineering(input_temp_table\n                        , project_id):\n\n    from google.cloud import bigquery\n    import pandas\n    import os\n\n    query = \"SELECT * FROM \" + input_temp_table\n    feature_temp_table = \"qwiklabs-gcp-01-df00ef1cf655.credit.credit_feature_temp\"\n\n    #Load the data from Bigquery based on given query\n    client = bigquery.Client(location=\"us-central1\", project=project_id)\n    load_job = client.query(query) \n    df = load_job.to_dataframe()\n\n    '''Perform feature engineering here'''\n    df.dropna(inplace=True)\n\n    #Upload the batch data to a temporary table\n    client.load_table_from_dataframe(dataframe= df, destination=feature_temp_table)\n    feature_temp_table_uri = \"bq://\" + feature_temp_table\n    return feature_temp_table_uri\n\ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of str.'.format(\n            str(str_value), str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Feature engineering', description='')\n_parser.add_argument(\"--input-temp-table\", dest=\"input_temp_table\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--project-id\", dest=\"project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\", dest=\"_output_paths\", type=str, nargs=1)\n_parsed_args = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = feature_engineering(**_parsed_args)\n\n_outputs = [_outputs]\n\n_output_serializers = [\n    _serialize_str,\n\n]\n\nimport os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"
+            ],
+            "image": "python:3.9"
+          }
+        },
+        "exec-get-input-data": {
+          "container": {
+            "args": [
+              "--query",
+              "{{$.inputs.parameters['query']}}",
+              "--project-id",
+              "{{$.inputs.parameters['project_id']}}",
+              "----output-paths",
+              "{{$.outputs.parameters['Output'].output_file}}"
+            ],
+            "command": [
+              "sh",
+              "-c",
+              "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery[pandas]==2.34.3' 'pandas' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery[pandas]==2.34.3' 'pandas' --user) && \"$0\" \"$@\"",
+              "sh",
+              "-ec",
+              "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+              "def get_input_data(query, project_id):\n\n    from google.cloud import bigquery\n    import pandas\n    import os\n\n    temp_table = \"qwiklabs-gcp-01-df00ef1cf655.credit.credit_data_temp\"\n\n    #Load the data from Bigquery based on given query\n    client = bigquery.Client(location=\"us-central1\", project=project_id)\n    load_job = client.query(query) \n    df = load_job.to_dataframe()\n\n    #Upload the batch data to a temporary table\n    client.load_table_from_dataframe(dataframe= df, destination=temp_table)\n\n    return temp_table\n\ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of str.'.format(\n            str(str_value), str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Get input data', description='')\n_parser.add_argument(\"--query\", dest=\"query\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--project-id\", dest=\"project_id\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\", dest=\"_output_paths\", type=str, nargs=1)\n_parsed_args = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = get_input_data(**_parsed_args)\n\n_outputs = [_outputs]\n\n_output_serializers = [\n    _serialize_str,\n\n]\n\nimport os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"
+            ],
+            "image": "python:3.9"
+          }
+        }
+      }
+    },
+    "pipelineInfo": {
+      "name": "batchscoringpipeline"
+    },
+    "root": {
+      "dag": {
+        "tasks": {
+          "batch-model-scoring": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-batch-model-scoring"
+            },
+            "dependentTasks": [
+              "feature-engineering"
+            ],
+            "inputs": {
+              "parameters": {
+                "inputpath": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "Output",
+                    "producerTask": "feature-engineering"
+                  }
+                },
+                "outputpath": {
+                  "componentInputParameter": "big_query_op"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "batch-model-scoring"
+            }
+          },
+          "feature-engineering": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-feature-engineering"
+            },
+            "dependentTasks": [
+              "get-input-data"
+            ],
+            "inputs": {
+              "parameters": {
+                "input_temp_table": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "Output",
+                    "producerTask": "get-input-data"
+                  }
+                },
+                "project_id": {
+                  "componentInputParameter": "project_id"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "feature-engineering"
+            }
+          },
+          "get-input-data": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-get-input-data"
+            },
+            "inputs": {
+              "parameters": {
+                "project_id": {
+                  "componentInputParameter": "project_id"
+                },
+                "query": {
+                  "componentInputParameter": "query"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "get-input-data"
+            }
+          }
+        }
+      },
+      "inputDefinitions": {
+        "parameters": {
+          "big_query_op": {
+            "type": "STRING"
+          },
+          "bucket": {
+            "type": "STRING"
+          },
+          "project_id": {
+            "type": "STRING"
+          },
+          "query": {
+            "type": "STRING"
+          },
+          "region": {
+            "type": "STRING"
+          }
+        }
+      }
+    },
+    "schemaVersion": "2.0.0",
+    "sdkVersion": "kfp-1.8.14"
+  },
+  "runtimeConfig": {
+    "parameters": {
+      "big_query_op": {
+        "stringValue": "bq://qwiklabs-gcp-01-df00ef1cf655.credit"
+      },
+      "bucket": {
+        "stringValue": "gs://vaibucket"
+      },
+      "project_id": {
+        "stringValue": "qwiklabs-gcp-01-df00ef1cf655"
+      },
+      "query": {
+        "stringValue": "SELECT * FROM qwiklabs-gcp-01-df00ef1cf655.credit.credit_data LIMIT 100"
+      },
+      "region": {
+        "stringValue": "us-central1"
+      }
+    }
+  }
+}

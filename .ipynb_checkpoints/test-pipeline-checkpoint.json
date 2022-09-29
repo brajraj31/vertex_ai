@@ -1,0 +1,216 @@
+{
+  "pipelineSpec": {
+    "components": {
+      "comp-batch-prediction": {
+        "executorLabel": "exec-batch-prediction",
+        "inputDefinitions": {
+          "parameters": {
+            "inputgcsuri": {
+              "type": "STRING"
+            },
+            "outputbquri": {
+              "type": "STRING"
+            }
+          }
+        }
+      },
+      "comp-feature-engineering": {
+        "executorLabel": "exec-feature-engineering",
+        "inputDefinitions": {
+          "parameters": {
+            "inputpath": {
+              "type": "STRING"
+            }
+          }
+        },
+        "outputDefinitions": {
+          "parameters": {
+            "Output": {
+              "type": "STRING"
+            }
+          }
+        }
+      },
+      "comp-get-input-data": {
+        "executorLabel": "exec-get-input-data",
+        "outputDefinitions": {
+          "parameters": {
+            "Output": {
+              "type": "STRING"
+            }
+          }
+        }
+      }
+    },
+    "deploymentSpec": {
+      "executors": {
+        "exec-batch-prediction": {
+          "container": {
+            "args": [
+              "--executor_input",
+              "{{$}}",
+              "--function_to_execute",
+              "batch_prediction"
+            ],
+            "command": [
+              "sh",
+              "-c",
+              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'google-cloud-aiplatform==1.8.0' 'kfp==1.8.14' && \"$0\" \"$@\"\n",
+              "sh",
+              "-ec",
+              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef batch_prediction(inputgcsuri:str, outputbquri:str):\n    import google.cloud.aiplatform as aip\n\n    model_id = '75325342595678208'\n    model = aip.Model(model_name=model_id, project='qwiklabs-gcp-01-df00ef1cf655', location='us-central1')\n    model.batch_predict(\n        job_display_name=\"prediction-123\",\n        gcs_source=inputgcsuri,\n        instances_format=\"csv\",\n        bigquery_destination_prefix=outputbquri\n    )\n\n"
+            ],
+            "image": "python:3.9"
+          }
+        },
+        "exec-feature-engineering": {
+          "container": {
+            "args": [
+              "--executor_input",
+              "{{$}}",
+              "--function_to_execute",
+              "feature_engineering"
+            ],
+            "command": [
+              "sh",
+              "-c",
+              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'kfp==1.8.14' && \"$0\" \"$@\"\n",
+              "sh",
+              "-ec",
+              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef feature_engineering(inputpath:str) -> str:\n    '''take input file and perform feature engineering'''\n    updatedinputpath = inputpath\n    return updatedinputpath\n\n"
+            ],
+            "image": "python:3.9"
+          }
+        },
+        "exec-get-input-data": {
+          "container": {
+            "args": [
+              "--executor_input",
+              "{{$}}",
+              "--function_to_execute",
+              "get_input_data"
+            ],
+            "command": [
+              "sh",
+              "-c",
+              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'kfp==1.8.14' && \"$0\" \"$@\"\n",
+              "sh",
+              "-ec",
+              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef get_input_data() -> str:\n    # getting data from API, save to Cloud Storage\n    # return GS URI\n    gcs_batch_input_path = 'gs://cloud-ai-platform-60f6fd86-0e8f-40ce-bf1b-6c73847561e2/creditcard.csv'\n    return gcs_batch_input_path\n\n"
+            ],
+            "image": "python:3.7"
+          }
+        }
+      }
+    },
+    "pipelineInfo": {
+      "name": "my-pipeline"
+    },
+    "root": {
+      "dag": {
+        "tasks": {
+          "batch-prediction": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-batch-prediction"
+            },
+            "dependentTasks": [
+              "feature-engineering"
+            ],
+            "inputs": {
+              "parameters": {
+                "inputgcsuri": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "Output",
+                    "producerTask": "feature-engineering"
+                  }
+                },
+                "outputbquri": {
+                  "componentInputParameter": "big_query_op"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "batch-prediction"
+            }
+          },
+          "feature-engineering": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-feature-engineering"
+            },
+            "dependentTasks": [
+              "get-input-data"
+            ],
+            "inputs": {
+              "parameters": {
+                "inputpath": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "Output",
+                    "producerTask": "get-input-data"
+                  }
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "feature-engineering"
+            }
+          },
+          "get-input-data": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-get-input-data"
+            },
+            "taskInfo": {
+              "name": "get-input-data"
+            }
+          }
+        }
+      },
+      "inputDefinitions": {
+        "parameters": {
+          "big_query_op": {
+            "type": "STRING"
+          },
+          "bucket": {
+            "type": "STRING"
+          },
+          "project_id": {
+            "type": "STRING"
+          },
+          "region": {
+            "type": "STRING"
+          }
+        }
+      }
+    },
+    "schemaVersion": "2.0.0",
+    "sdkVersion": "kfp-1.8.14"
+  },
+  "runtimeConfig": {
+    "gcsOutputDirectory": "gs://vaibucket/pipeline_root",
+    "parameters": {
+      "big_query_op": {
+        "stringValue": "bq://qwiklabs-gcp-01-df00ef1cf655.credit"
+      },
+      "bucket": {
+        "stringValue": "gs://vaibucket"
+      },
+      "project_id": {
+        "stringValue": "qwiklabs-gcp-01-df00ef1cf655"
+      },
+      "region": {
+        "stringValue": "us-central1"
+      }
+    }
+  }
+}
